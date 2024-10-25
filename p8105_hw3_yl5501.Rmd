@@ -1,0 +1,378 @@
+---
+title: "hw3"
+author: Yujie Li
+date: 2024-10-14 
+output: html_document
+---
+
+
+```{r, echo = FALSE, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+```
+
+# Problem 1
+
+```{r}
+library(p8105.datasets)
+data("ny_noaa")
+glimpse(ny_noaa)
+summary(ny_noaa)
+```
+This dataset contains 2595176 rows and 7 columns. 
+Key variables:
+id (weather station), date, prnp (precipitation in tenths of mm), snow (snowfall in mm), snwd (snow depth in mm), tmax (max temperature in Celsius), tmin (min temperature in Celsius). 
+
+A lot of observations for tmax, tmin, snow, and snwd are missing. 
+
+
+```{r}
+ny_noaa_clean = ny_noaa %>%
+  mutate(
+    year = year(date),
+    month = month(date),
+    day = day(date),
+    tmax = as.numeric(tmax) / 10,
+    tmin = as.numeric(tmin) / 10,
+    prcp = as.numeric(prcp) / 10
+  )
+
+ny_noaa_clean
+```
+
+```{r}
+snowfall_common = ny_noaa_clean %>%
+  count(snow, sort = TRUE)
+
+head(snowfall_common, 10)
+```
+
+For snowfall, 0 is the most common value because in most of the days during a year, there won't be snowfall.
+
+
+# Plot A - average max temperature in January and in July in each station across years #
+```{r}
+ny_noaa_clean = ny_noaa_clean %>%
+  filter(!is.na(tmax))
+
+jan_jul_temp = ny_noaa_clean %>%
+  filter(month %in% c(1, 7)) %>%   
+  group_by(id, year, month) %>%
+  summarize(avg_tmax = mean(tmax, na.rm = TRUE)) %>%   
+  mutate(month = ifelse(month == 1, "January", "July"))  
+
+ggplot(jan_jul_temp, aes(x = year, y = avg_tmax, color = id)) +
+  geom_line(alpha = 0.6) +  
+  facet_wrap(~ month, scales = "free_y") +  
+  labs(
+    title = "Average Maximum Temperature in January and July by Station",
+    x = "Year",
+    y = "Average Max Temperature (°C)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1)  
+  )
+```
+
+In Januarary, the lowest average max temperatures across stations are lower and have more variations comparing to July. 
+
+There are outliers in Januarary 1982, 2004 and outliers in July 1988, 2004, and 2007. 
+
+
+
+
+
+# Plot B - tmax vs tmin for the full dataset #
+
+```{r}
+library(tidyverse)
+density_plot = ggplot(ny_noaa_clean, aes(x = tmin, y = tmax)) +
+  geom_density_2d() +  # Use contour lines to visualize density
+  labs(
+    title = "Density Contour Plot of Tmax vs Tmin",
+    x = "Minimum Temperature (°C)",
+    y = "Maximum Temperature (°C)"
+  ) +
+  theme_minimal()
+
+print(density_plot)
+
+```
+
+
+
+
+# Plot C - distribution of snowfall values greater than 0 and less than 100 separately by year #
+
+```{r}
+snowfall_filtered = ny_noaa_clean %>%
+  filter(snow > 0 & snow < 100)
+
+# Plot snowfall distribution by year
+snowfall_plot = ggplot(snowfall_filtered, aes(x = year, y = snow)) +
+  geom_boxplot(aes(group = year)) +  # Boxplot to show distribution per year
+  labs(
+    title = "Distribution of Snowfall (0 < Snow < 100 mm) by Year",
+    x = "Year",
+    y = "Snowfall (mm)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+library(patchwork)
+print (density_plot + snowfall_plot)
+```
+
+
+
+
+
+
+# Problem 2
+
+
+```{r}
+accel = read.csv("nhanes_accel.csv") |> 
+  janitor::clean_names()
+
+covar = read.csv("nhanes_covar.csv", skip = 4) |> 
+  janitor::clean_names() |> 
+  filter(age >= 21, !is.na(sex), !is.na(age), !is.na(bmi), !is.na(education)) |> 
+  mutate(
+    sex = factor(sex, levels = c(1, 2), labels = c("Male", "Female")),
+    education = factor(education, 
+                          levels = c(1, 2, 3), 
+                          labels = c("Less than high school", 
+                                     "High school equivalent", 
+                                     "More than high school"))
+  )
+
+nhanes_data = inner_join(accel, covar, by = "seqn")
+nhanes_data
+
+```
+
+# Table A for the number of men and women in each education category #
+```{r}
+gender_education_table = nhanes_data %>%
+  group_by(sex, education) %>%
+  summarize(n = n(), .groups = "drop") %>%  
+  pivot_wider(names_from = sex, values_from = n, values_fill = 0)
+
+print(gender_education_table)
+```
+In each category, the counts of males and females are relatively similar, indicating a balanced gender representation across education levels.
+
+
+
+# Visualization of the age distributions for men and women in each education category #
+```{r}
+ggplot(nhanes_data, aes(x = age, fill = sex)) +
+  geom_histogram(binwidth = 5, position = "dodge") +  
+  facet_wrap(~ education, scales = "free_y") +  
+  labs(
+    title = "Age Distributions by Sex and Education Level",
+    x = "Age",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+More than high school education shows female participants are significantly more than males around 30s and 40s. 
+
+High school equivalent appears to have a relatively even distribution of participants across ages, but with fewer participants in total.
+
+Less than high school has a concentration of participants in older age groups, which aligns with the idea that older individuals may have had less access to education.
+
+
+# Total activities (y-axis) against age (x-axis) #
+```{r}
+mims |> 
+  rowwise() |>
+  mutate(activity = sum(c_across(starts_with("min")), na.rm = TRUE)) |> 
+  ungroup() |> 
+  group_by(sex, education) |> 
+  ggplot(aes(x = age, y = activity, color = sex)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "loess") +
+  facet_wrap(~education) +
+  labs(
+    title = "Total Activity vs. Age by Sex and Education Level",
+    x = "Age", y = "Total Daily Activity"
+  ) 
+```
+
+Across education levels, female group tends to have slightly higher or more stable activity levels than men, especially in older ages.
+
+Male group shows more variability in activity across all age ranges, which could reflect lifestyle differences or participation in higher-intensity activities.
+
+
+```{r}
+mims |> 
+  pivot_longer(
+    cols = starts_with("min"),
+    names_to = "minute",
+    names_prefix = "min",
+    values_to = "activity"
+  ) |> 
+  mutate(minute = as.numeric(minute)) |> 
+  group_by(minute, sex, education) |> 
+  summarize(mean_activity = mean(activity, na.rm = TRUE), .groups = "drop") |> 
+  ggplot(aes(x = minute, y = mean_activity, color = sex)) + 
+  geom_point(alpha = 0.1) +  # Add transparency to reduce overplotting
+  geom_smooth(linewidth = 1.2) +  # Use linewidth instead of size
+  facet_wrap(~education, nrow = 3) +  # Facet by education level
+  scale_x_continuous(
+    breaks = seq(0, 1440, by = 120),  # Set x-axis breaks every 2 hours
+    labels = function(x) sprintf("%02d:00", x / 60)  # Convert minutes to HH:MM format
+  ) + 
+  labs(
+    title = "24-Hour Activity Time Courses by Education Level and Sex",
+    x = "Time of Day",
+    y = "Mean Activity Level",
+    color = "Sex"
+  ) + 
+  theme_minimal() + 
+  theme(legend.position = "top")
+
+```
+
+Male and female show similar activity patterns throughout the day, though female tend to have slightly higher mean activity levels in most cases.
+
+All education levels show a similar daily activity pattern, with activity reaches the peak between 8:00 AM and 6:00 PM and declining overnight, consistant with the circadian rythm. 
+
+
+# Problem 3 #
+
+```{r}
+bike201 <- read.csv("citibike/Jan 2020 Citi.csv") |> 
+  janitor::clean_names() |> 
+  mutate(year = 2020, month = "Jan")
+bike207 <- read.csv("citibike/July 2020 Citi.csv") |> 
+  janitor::clean_names() |> 
+  mutate(year = 2020, month = "July")
+bike241 <- read.csv("citibike/Jan 2024 Citi.csv") |> 
+  janitor::clean_names() |> 
+  mutate(year = 2024, month = "Jan")
+bike247 <- read.csv("citibike/July 2024 Citi.csv") |> 
+  janitor::clean_names() |> 
+  mutate(year = 2024, month = "July")
+
+citibike = bind_rows(bike201, bike207, bike241, bike247) |> 
+  mutate(
+    weekdays = factor(weekdays, 
+                      levels =c("Monday", "Tuesday", "Wednesday", "Thursday", 
+                                "Friday", "Saturday", "Sunday")),
+    month = factor(month),
+    year = factor(year),
+   rideable_type = factor(rideable_type)
+  )
+
+str(citibike)
+```
+The dataset contains 99485 observations of 9 variables. 
+
+
+# Table A #
+
+```{r}
+citibike_summary <- citibike |> 
+  group_by(year, month, member_casual) |> 
+  summarize(number = n(), .groups = "drop") |> 
+  pivot_wider(
+    names_from = member_casual, 
+    values_from = number, 
+    values_fill = 0  
+  ) |> 
+  arrange(year, month)
+
+knitr::kable(
+  citibike_summary, 
+  caption = "Monthly Citibike Usage by Membership Type", 
+  col.names = c("Year", "Month", "Casual Users", "Members")
+)
+```
+
+Comments:
+In both 2020 and 2024, July shows much higher ridership compared to January. This suggests seasonal effects where people use Citibikes more often during the hot months.
+January has much lower ridership, which aligns with our expectations, as people are less likely to use bikes under colder weather.
+
+
+
+# Table B #
+
+```{r}
+citibike |> 
+  filter(year == 2024, month == "July") |>  
+  group_by(start_station_name) |> 
+  summarize(total_rides = n(), .groups = "drop") |>  
+  arrange(desc(total_rides)) |> 
+  slice_head(n = 5) |>  
+  knitr::kable(
+    caption = "Top 5 Most Popular Starting Stations for July 2024", 
+    col.names = c("Starting Station", "Total Rides")
+  )
+```
+
+5 most popular starting stations: 
+Pier 61 at Chelsea Piers, 
+University Pl & E 14 St, 
+W 21 St & 6 Ave,
+West St & Chambers St,
+W 31 St & 7 Ave.
+
+
+
+# Plot A #
+```{r}
+citibike |> 
+  group_by(year, month, weekdays) |>  
+  summarize(median_duration = median(duration)) |> 
+  ggplot(aes(x = weekdays, y = median_duration, color = factor(year))) +
+  geom_point(aes(group = year)) +
+  geom_line(aes(group = year)) +  
+  facet_wrap(~ month + year, ncol = 2, nrow = 2) +  
+  labs(title = "Median Ride Duration by Day of Week, Month, and Year",
+       x = "Day of the Week", 
+       y = "Median Ride Duration (minutes)", 
+       color = "Year")
+```
+Comments:
+The median ride duration for both weekdays and weekends seems to have increased slightly in 2024 compared to 2020, especially on weekends, which might due to the recovery of public from pandemic. 
+There is very little change in January ride durations between 2020 and 2024. The consistency across years suggests that people don't like riding under cold weathers as always. 
+
+
+# Plot B #
+```{r}
+citibike |> 
+  filter(year == 2024) |> 
+  ggplot(aes(x = factor(month, levels = month.name), y = duration, color = rideable_type)) +  
+  geom_boxplot(outlier.alpha = 0.5) +  
+  facet_wrap(~ member_casual, labeller = label_both) +  
+  labs(
+    title = "Impact of Month, Membership Status, and Bike Type on Ride Duration in 2024", 
+    x = "Month", 
+    y = "Ride Duration (min)", 
+    color = "Bike Type"
+  ) + 
+  theme_minimal() +  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    legend.position = "top"  
+  )
+```
+
+Comments:
+Electric bikes tend to have slightly longer ride durations than classic bikes, likely because users may travel farther with less effort.
+Classic bikes show more uniform ride durations, particularly for members, with fewer outliers. 
+
+
+
+
